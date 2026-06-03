@@ -207,9 +207,16 @@ app.get('/opds', authenticateUser, async (req: Request, res: Response) => {
               .filter(({ visible }) => visible)
               .map(({ library }) => library)
 
-    //Skip listing libraries and redirect to the first library if only a single library is configured
-    if (parsedLibaries.length === 1 && visibleLibraries.length === 1) {
-        return res.redirect(`/opds/libraries/${visibleLibraries[0].id}?categories=true`)
+    //Skip listing libraries if only a single library is visible.
+    if (visibleLibraries.length === 1) {
+        const library = visibleLibraries[0]
+        return res.type('application/xml').send(
+            buildOPDSXMLSkeleton(
+                `urn:uuid:${library.id}`,
+                `Categories`,
+                buildCategoryEntries(library.id, user, req.headers['accept-language'])
+            )
+        )
     }
 
     res.type('application/xml').send(
