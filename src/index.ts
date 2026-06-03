@@ -208,7 +208,7 @@ app.get('/opds', authenticateUser, async (req: Request, res: Response) => {
               .map(({ library }) => library)
 
     //Skip listing libraries and redirect to the first library if only a single library is configured
-    if (visibleLibraries.length === 1) {
+    if (parsedLibaries.length === 1 && visibleLibraries.length === 1) {
         return res.redirect(`/opds/libraries/${visibleLibraries[0].id}?categories=true`)
     }
 
