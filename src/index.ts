@@ -8,7 +8,9 @@ import {
     buildItemEntries,
     buildLibraryEntries,
     buildOPDSXMLSkeleton,
-    buildSearchDefinition
+    buildSearchDefinition,
+    OPDS_CATEGORY_TYPES,
+    type OpdsCategory
 } from './helpers/abs'
 import { apiCall, loginToAudiobookshelf, proxyToAudiobookshelf } from './helpers/api'
 import { Library, LibraryItem } from './types/library'
@@ -22,6 +24,7 @@ export const serverURL = process.env.ABS_URL || 'http://localhost:3000'
 const internalUsersString = process.env.OPDS_USERS || ''
 const showAudioBooks = process.env.SHOW_AUDIOBOOKS === 'true' || false
 const showCharCards = process.env.SHOW_CHAR_CARDS === 'true' || false
+const enabledOPDSCategories = parseOPDSCategories(process.env.OPDS_CATEGORIES)
 await loadLocalizations()
 
 const internalUsers: InternalUser[] = internalUsersString.split(',').map((user) => {
@@ -35,6 +38,56 @@ interface CacheEntry {
 }
 const libraryItemsCache: Record<string, CacheEntry> = {}
 const CACHE_EXPIRATION = 60 * 60 * 1000 // 1 hour in milliseconds
+
+function parseOPDSCategories(value?: string): OpdsCategory[] {
+    if (!value?.trim()) {
+        return [...OPDS_CATEGORY_TYPES]
+    }
+
+    const categories: OpdsCategory[] = []
+    for (const category of value.split(',')) {
+        const normalizedCategory = category.trim().toLowerCase()
+        if ((OPDS_CATEGORY_TYPES as readonly string[]).includes(normalizedCategory)) {
+            const opdsCategory = normalizedCategory as OpdsCategory
+            if (!categories.includes(opdsCategory)) {
+                categories.push(opdsCategory)
+            }
+        } else if (normalizedCategory) {
+            console.warn(`Ignoring unknown OPDS category "${normalizedCategory}"`)
+        }
+    }
+
+    return categories
+}
+
+function ensureOPDSCategoryIsEnabled(category: OpdsCategory, res: Response): boolean {
+    if (enabledOPDSCategories.includes(category)) {
+        return true
+    }
+
+    res.status(404).send('Category not found')
+    return false
+}
+
+function getRouteCategory(type: string): OpdsCategory | null {
+    return (OPDS_CATEGORY_TYPES as readonly string[]).includes(type) ? (type as OpdsCategory) : null
+}
+
+function getLibraryItemsCategory(req: Request): OpdsCategory | null {
+    if (req.query.sort === 'recent') {
+        return 'recent'
+    }
+
+    if (typeof req.query.type === 'string') {
+        return getRouteCategory(req.query.type)
+    }
+
+    if (req.query.q || req.query.author || req.query.title) {
+        return null
+    }
+
+    return 'all'
+}
 
 async function authenticateUser(req: Request, res: Response, next: NextFunction): Promise<void> {
     const authHeader = req.headers.authorization
@@ -185,6 +238,10 @@ async function ensureLibraryIsVisible(libraryId: string, user: InternalUser, res
     return false
 }
 
+const sortItemsByTitle = (items: LibraryItem[]): void => {
+    items.sort((a, b) => (a.title || '').localeCompare(b.title || '', undefined, { sensitivity: 'base' }))
+}
+
 app.get('/opds', authenticateUser, async (req: Request, res: Response) => {
     const user = req.user!
 
@@ -214,7 +271,7 @@ app.get('/opds', authenticateUser, async (req: Request, res: Response) => {
             buildOPDSXMLSkeleton(
                 `urn:uuid:${library.id}`,
                 `Categories`,
-                buildCategoryEntries(library.id, user, req.headers['accept-language'])
+                buildCategoryEntries(library.id, user, req.headers['accept-language'], enabledOPDSCategories)
             )
         )
     }
@@ -241,9 +298,14 @@ app.get('/opds/libraries/:libraryId', authenticateUser, async (req: Request, res
             buildOPDSXMLSkeleton(
                 `urn:uuid:${req.params.libraryId}`,
                 `Categories`,
-                buildCategoryEntries(req.params.libraryId, user, lang)
+                buildCategoryEntries(req.params.libraryId, user, lang, enabledOPDSCategories)
             )
         )
+        return
+    }
+
+    const requestedCategory = getLibraryItemsCategory(req)
+    if (requestedCategory && !ensureOPDSCategoryIsEnabled(requestedCategory, res)) {
         return
     }
 
@@ -320,6 +382,10 @@ app.get('/opds/libraries/:libraryId', authenticateUser, async (req: Request, res
         )
     }
 
+    if (req.query.sort !== 'recent') {
+        sortItemsByTitle(parsedItems)
+    }
+
     // Pagination
     const page = parseInt(req.query.page as string) || 0
     const pageSize = process.env.OPDS_PAGE_SIZE ? parseInt(process.env.OPDS_PAGE_SIZE) : 20
@@ -359,13 +425,13 @@ app.get('/opds/libraries/:libraryId/:type', authenticateUser, async (req: Reques
         return
     }
 
-    if (
-        req.params.type !== 'authors' &&
-        req.params.type !== 'narrators' &&
-        req.params.type !== 'genres' &&
-        req.params.type !== 'series'
-    ) {
+    const category = getRouteCategory(req.params.type)
+    if (!category || category === 'all' || category === 'recent') {
         res.status(400).send('Invalid type')
+        return
+    }
+
+    if (!ensureOPDSCategoryIsEnabled(category, res)) {
         return
     }
 
