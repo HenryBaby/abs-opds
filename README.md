@@ -28,7 +28,7 @@ OPDS-Server for ABS (Audiobookshelf) is a working OPDS server that can be used w
 
 ## Built-In Demo
 
-Spin up the provided Docker Compose instance and add `http://<local-server-ip>:3010/opds` to your OPDS reader and type in the credentials `demotest` for both username and password.
+Spin up the provided Docker Compose instance and add `http://<local-server-ip>:3010/opds` to your OPDS reader and type in the credentials `test` for both username and password.
 
 
 ## ENVs
