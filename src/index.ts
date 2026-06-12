@@ -12,7 +12,13 @@ import {
     OPDS_CATEGORY_TYPES,
     type OpdsCategory
 } from './helpers/abs.js'
-import { apiCall, downloadItemFromAudiobookshelf, loginToAudiobookshelf, proxyToAudiobookshelf } from './helpers/api.js'
+import {
+    apiCall,
+    coverFromAudiobookshelf,
+    downloadItemFromAudiobookshelf,
+    loginToAudiobookshelf,
+    proxyToAudiobookshelf
+} from './helpers/api.js'
 import { Library, LibraryItem } from './types/library.js'
 import { hash } from 'crypto'
 import { loadLocalizations } from './i18n/i18n.js'
@@ -182,6 +188,7 @@ declare global {
 
 app.get('/opds/proxy/{*any}', (req, res) => proxyToAudiobookshelf(req, res))
 app.get('/opds/download/:itemId/:filename', (req, res) => downloadItemFromAudiobookshelf(req, res))
+app.get('/opds/cover/:itemId', (req, res) => coverFromAudiobookshelf(req, res))
 
 const parseItems = (items: any): LibraryItem[] =>
     items.results
