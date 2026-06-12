@@ -17,6 +17,8 @@ RUN pnpm install --frozen-lockfile
 
 COPY --chown=node:node . .
 
+RUN pnpm run build
+
 EXPOSE 3010
 
-CMD ["node", "server.js"]
+CMD ["node", "dist/index.js"]
