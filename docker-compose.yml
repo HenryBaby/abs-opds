@@ -1,16 +1,16 @@
 services:
-  opds:
-    build:
-      context: .
-    container_name: abs-opds
-    restart: unless-stopped
-    ports:
-      - "3010:3010"
-    environment:
-      - NODE_ENV=production
-      - PORT=3010
-      - ABS_URL=https://audiobooks.dev
-      - OPDS_PAGE_SIZE=20
-      - OPDS_CATEGORIES=all,recent,authors,narrators,genres,series
-      - SHOW_AUDIOBOOKS=true
-      - SHOW_CHAR_CARDS=true
+    opds:
+        build:
+            context: .
+        container_name: abs-opds
+        restart: unless-stopped
+        ports:
+            - '3010:3010'
+        environment:
+            - NODE_ENV=production
+            - PORT=3010
+            - ABS_URL=https://audiobooks.dev
+            - OPDS_PAGE_SIZE=20
+            - OPDS_CATEGORIES=all,recent,authors,narrators,genres,series
+            - SHOW_AUDIOBOOKS=true
+            - SHOW_CHAR_CARDS=true

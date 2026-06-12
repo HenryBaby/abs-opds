@@ -1,7 +1,7 @@
-import { InternalUser } from '../types/internal'
+import { InternalUser } from '../types/internal.js'
 import type { Request, Response } from 'express'
 import axios from 'axios'
-import { serverURL, useProxy } from '../index'
+import { serverURL, useProxy } from '../index.js'
 import crypto from 'crypto'
 
 interface CachedToken {
@@ -10,7 +10,7 @@ interface CachedToken {
 }
 
 const tokenCache = new Map<string, CachedToken>()
-const CACHE_TTL = 10 * 60 * 1000 
+const CACHE_TTL = 10 * 60 * 1000
 
 // https://stackoverflow.com/questions/6953286/how-to-encrypt-data-that-needs-to-be-decrypted-in-node-js
 function encryptTokenWithPassword(token: string, password: string): string {
@@ -99,9 +99,9 @@ export async function loginToAudiobookshelf(username: string, password: string):
             if (process.env.NODE_ENV === 'development') {
                 console.log(`[DEBUG] ABS login successful for user: ${userData.username}`)
             }
-            
+
             setCachedToken(username, userData.accessToken, password)
-            
+
             return {
                 name: userData.username,
                 apiKey: userData.accessToken

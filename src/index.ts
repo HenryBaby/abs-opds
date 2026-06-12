@@ -1,5 +1,5 @@
 import express, { Request, Response, NextFunction } from 'express'
-import { InternalUser } from './types/internal'
+import { InternalUser } from './types/internal.js'
 import 'dotenv/config'
 import {
     buildCardEntries,
@@ -11,11 +11,11 @@ import {
     buildSearchDefinition,
     OPDS_CATEGORY_TYPES,
     type OpdsCategory
-} from './helpers/abs'
-import { apiCall, loginToAudiobookshelf, proxyToAudiobookshelf } from './helpers/api'
-import { Library, LibraryItem } from './types/library'
+} from './helpers/abs.js'
+import { apiCall, loginToAudiobookshelf, proxyToAudiobookshelf } from './helpers/api.js'
+import { Library, LibraryItem } from './types/library.js'
 import { hash } from 'crypto'
-import { loadLocalizations } from './i18n/i18n'
+import { loadLocalizations } from './i18n/i18n.js'
 
 const app = express()
 const port = process.env.PORT || 3010
@@ -69,7 +69,10 @@ function ensureOPDSCategoryIsEnabled(category: OpdsCategory, res: Response): boo
     return false
 }
 
-function getRouteCategory(type: string): OpdsCategory | null {
+function getRouteCategory(type: string | string[]): OpdsCategory | null {
+    if (Array.isArray(type)) {
+        return null
+    }
     return (OPDS_CATEGORY_TYPES as readonly string[]).includes(type) ? (type as OpdsCategory) : null
 }
 
@@ -210,7 +213,10 @@ function getLibraryItemsCacheKey(libraryId: string, user: InternalUser): string 
     return `${hash('sha1', `${user.name}:${user.apiKey}`)}:${libraryId}`
 }
 
-async function getLibraryItems(libraryId: string, user: InternalUser) {
+async function getLibraryItems(libraryId: string | string[], user: InternalUser) {
+    if (Array.isArray(libraryId)) {
+        return null
+    }
     const cacheKey = getLibraryItemsCacheKey(libraryId, user)
 
     if (libraryItemsCache[cacheKey] && Date.now() - libraryItemsCache[cacheKey].timestamp < CACHE_EXPIRATION) {
@@ -222,15 +228,26 @@ async function getLibraryItems(libraryId: string, user: InternalUser) {
     return items
 }
 
-async function libraryHasVisibleItems(libraryId: string, user: InternalUser): Promise<boolean> {
+async function libraryHasVisibleItems(libraryId: string | string[], user: InternalUser): Promise<boolean> {
+    if (Array.isArray(libraryId)) {
+        return false
+    }
     if (showAudioBooks) return true
 
     const items = await getLibraryItems(libraryId, user)
     return parseItems(items).length > 0
 }
 
-async function ensureLibraryIsVisible(libraryId: string, user: InternalUser, res: Response): Promise<boolean> {
-    if (await libraryHasVisibleItems(libraryId, user)) {
+async function ensureLibraryIsVisible(
+    libraryId: string | string[],
+    user: InternalUser,
+    res: Response
+): Promise<boolean> {
+    if (Array.isArray(libraryId)) {
+        return false
+    }
+
+    if (await libraryHasVisibleItems(libraryId as string, user)) {
         return true
     }
 
@@ -267,13 +284,15 @@ app.get('/opds', authenticateUser, async (req: Request, res: Response) => {
     //Skip listing libraries if only a single library is visible.
     if (visibleLibraries.length === 1) {
         const library = visibleLibraries[0]
-        return res.type('application/xml').send(
-            buildOPDSXMLSkeleton(
-                `urn:uuid:${library.id}`,
-                `Categories`,
-                buildCategoryEntries(library.id, user, req.headers['accept-language'], enabledOPDSCategories)
+        return res
+            .type('application/xml')
+            .send(
+                buildOPDSXMLSkeleton(
+                    `urn:uuid:${library.id}`,
+                    `Categories`,
+                    buildCategoryEntries(library.id, user, req.headers['accept-language'], enabledOPDSCategories)
+                )
             )
-        )
     }
 
     res.type('application/xml').send(
@@ -318,12 +337,12 @@ app.get('/opds/libraries/:libraryId', authenticateUser, async (req: Request, res
     // Sort based on recently added
     if (req.query.sort === 'recent') {
         parsedItems.sort((a, b) => {
-            const dateA = new Date(a.addedAt || 0).getTime();
-            const dateB = new Date(b.addedAt || 0).getTime();
-            return dateB - dateA;
-        });
+            const dateA = new Date(a.addedAt || 0).getTime()
+            const dateB = new Date(b.addedAt || 0).getTime()
+            return dateB - dateA
+        })
     }
-    
+
     // Filter based on query, author, or title if provided
     if (req.query.q || req.query.type) {
         const query = req.query.q as string
@@ -500,7 +519,7 @@ app.get('/opds/libraries/:libraryId/:type', authenticateUser, async (req: Reques
             buildOPDSXMLSkeleton(
                 `urn:uuid:${req.params.libraryId}`,
                 `${library.name}`,
-                buildCustomCardEntries(itemCards, req.params.type, user, req.params.libraryId)
+                buildCustomCardEntries(itemCards)
             )
         )
         return
