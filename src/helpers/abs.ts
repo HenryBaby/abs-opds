@@ -1,24 +1,66 @@
 import * as builder from 'xmlbuilder'
-import { XMLNode } from 'xmlbuilder'
-import { Library, LibraryItem } from '../types/library.js'
+import type { XMLNode } from 'xmlbuilder'
+import type { Library, LibraryItem } from '../types/library.js'
 import { serverURL, useProxy } from '../index.js'
-import { InternalUser } from '../types/internal.js'
-import { Request } from 'express'
+import type { InternalUser } from '../types/internal.js'
+import type { Request } from 'express'
 import localize from '../i18n/i18n.js'
+import { buildDownloadFilename, getDownloadMimeType } from './download.js'
 
 export const OPDS_CATEGORY_TYPES = ['all', 'recent', 'authors', 'narrators', 'genres', 'series'] as const
 export type OpdsCategory = (typeof OPDS_CATEGORY_TYPES)[number]
+
+export interface OPDSXMLSkeletonOptions {
+    endOfPage?: boolean
+    library?: Library
+    pageSize?: number
+    request?: Request
+    totalItems?: number
+    updated?: string
+    user?: InternalUser
+}
+
+function getQueryValue(value: unknown): string | undefined {
+    if (typeof value === 'string') {
+        return value
+    }
+
+    if (Array.isArray(value) && typeof value[0] === 'string') {
+        return value[0]
+    }
+
+    return undefined
+}
+
+function getCurrentPage(request: Request): number {
+    const page = Number.parseInt(getQueryValue(request.query.page) || '', 10)
+    return Number.isFinite(page) && page > 0 ? page : 0
+}
+
+function getPaginationBaseUrl(request: Request): string {
+    const [path, queryString] = request.originalUrl.split('?')
+    const query = new URLSearchParams(queryString || '')
+    query.delete('page')
+
+    const serializedQuery = query.toString()
+    return serializedQuery ? `${path}?${serializedQuery}` : path
+}
 
 export function buildOPDSXMLSkeleton(
     id: string,
     title: string,
     entriesXML: XMLNode[],
-    library?: Library,
-    user?: InternalUser,
-    request?: Request,
-    endOfPage?: boolean,
-    totalItems?: number
+    options: OPDSXMLSkeletonOptions = {}
 ): string {
+    const {
+        endOfPage,
+        library,
+        pageSize = 20,
+        request,
+        totalItems,
+        updated = new Date().toISOString(),
+        user
+    } = options
     const xml = builder
         .create('feed', { version: '1.0', encoding: 'UTF-8' })
         .att('xmlns', 'http://www.w3.org/2005/Atom')
@@ -39,7 +81,7 @@ export function buildOPDSXMLSkeleton(
         .up()
         .up()
         .up()
-        .ele('updated', new Date().toISOString())
+        .ele('updated', updated)
         .up()
 
     // If there are entries, append them using raw
@@ -75,22 +117,21 @@ export function buildOPDSXMLSkeleton(
 
         // OpenSearch elements for pagination information
         if (totalItems !== undefined) {
-            const pageSize = process.env.OPDS_PAGE_SIZE ? parseInt(process.env.OPDS_PAGE_SIZE) : 20
-            const currentPage = parseInt(request.query.page as string) || 0
+            const currentPage = getCurrentPage(request)
             const startIndex = currentPage * pageSize + 1 // 1-based index for OpenSearch
+            const itemsOnPage = Math.max(0, Math.min(pageSize, totalItems - currentPage * pageSize))
 
             xml.ele('opensearch:totalResults', totalItems.toString()).up()
             xml.ele('opensearch:startIndex', startIndex.toString()).up()
-            xml.ele('opensearch:itemsPerPage', Math.min(pageSize, totalItems - currentPage * pageSize).toString()).up()
+            xml.ele('opensearch:itemsPerPage', itemsOnPage.toString()).up()
         }
         // Pagination
-        const baseUrl = request.originalUrl.replace(/[?&]page=\d+/, '')
+        const baseUrl = getPaginationBaseUrl(request)
         const separator = baseUrl.includes('?') ? '&' : '?'
-        const currentPage = parseInt(request.query.page as string) || 0
+        const currentPage = getCurrentPage(request)
 
         let totalPages = 0
         if (totalItems !== undefined) {
-            const pageSize = process.env.OPDS_PAGE_SIZE ? parseInt(process.env.OPDS_PAGE_SIZE) : 20
             totalPages = Math.ceil(totalItems / pageSize)
         }
 
@@ -139,10 +180,14 @@ export function buildOPDSXMLSkeleton(
         }
     }
 
-    return xml.end({ pretty: true })
+    return xml.end({ pretty: false })
 }
 
-export function buildLibraryEntries(libraries: Library[], user: InternalUser): XMLNode[] {
+export function buildLibraryEntries(
+    libraries: Library[],
+    user: InternalUser,
+    updated = new Date().toISOString()
+): XMLNode[] {
     // Create entries without XML declaration by using builder options
     return libraries.flatMap((library) => [
         builder
@@ -151,7 +196,7 @@ export function buildLibraryEntries(libraries: Library[], user: InternalUser): X
             .up()
             .ele('title', library.name)
             .up()
-            .ele('updated', new Date().toISOString())
+            .ele('updated', updated)
             .up()
             .ele('link', {
                 type: 'application/atom+xml;profile=opds-catalog',
@@ -166,7 +211,8 @@ export function buildCategoryEntries(
     libraryId: string | string[],
     user: InternalUser,
     lang?: string | string[],
-    enabledCategories: readonly OpdsCategory[] = OPDS_CATEGORY_TYPES
+    enabledCategories: readonly OpdsCategory[] = OPDS_CATEGORY_TYPES,
+    updated = new Date().toISOString()
 ): XMLNode[] {
     if (Array.isArray(libraryId)) {
         return []
@@ -178,7 +224,7 @@ export function buildCategoryEntries(
             .up()
             .ele('title', localize('category.all', lang))
             .up()
-            .ele('updated', new Date().toISOString())
+            .ele('updated', updated)
             .up()
             .ele('link', {
                 type: 'application/atom+xml;profile=opds-catalog',
@@ -192,7 +238,7 @@ export function buildCategoryEntries(
             .up()
             .ele('title', localize('category.recent', lang))
             .up()
-            .ele('updated', new Date().toISOString())
+            .ele('updated', updated)
             .up()
             .ele('link', {
                 type: 'application/atom+xml;profile=opds-catalog',
@@ -206,6 +252,8 @@ export function buildCategoryEntries(
             .up()
             .ele('title', localize('category.authors', lang))
             .up()
+            .ele('updated', updated)
+            .up()
             .ele('link', {
                 type: 'application/atom+xml;profile=opds-catalog',
                 rel: 'subsection',
@@ -217,6 +265,8 @@ export function buildCategoryEntries(
             .ele('id', 'narrators')
             .up()
             .ele('title', localize('category.narrators', lang))
+            .up()
+            .ele('updated', updated)
             .up()
             .ele('link', {
                 type: 'application/atom+xml;profile=opds-catalog',
@@ -230,6 +280,8 @@ export function buildCategoryEntries(
             .up()
             .ele('title', localize('category.genres', lang))
             .up()
+            .ele('updated', updated)
+            .up()
             .ele('link', {
                 type: 'application/atom+xml;profile=opds-catalog',
                 rel: 'subsection',
@@ -241,6 +293,8 @@ export function buildCategoryEntries(
             .ele('id', 'series')
             .up()
             .ele('title', localize('category.series', lang))
+            .up()
+            .ele('updated', updated)
             .up()
             .ele('link', {
                 type: 'application/atom+xml;profile=opds-catalog',
@@ -257,27 +311,38 @@ export function buildCardEntries(
     items: string[],
     type: string | string[],
     user: InternalUser,
-    libraryId: string | string[]
+    libraryId: string | string[],
+    updated = new Date().toISOString()
 ): XMLNode[] {
     return items.map((item) => {
+        const libraryIdValue = Array.isArray(libraryId) ? libraryId[0] || '' : libraryId
+        const typeValue = Array.isArray(type) ? type[0] || '' : type
+        const query = new URLSearchParams({
+            name: item,
+            type: typeValue
+        })
+
         return builder
             .create('entry', { headless: true })
             .ele('id', item.toLowerCase().replace(' ', '-'))
             .up()
             .ele('title', item)
             .up()
-            .ele('updated', new Date().toISOString())
+            .ele('updated', updated)
             .up()
             .ele('link', {
                 type: 'application/atom+xml;profile=opds-catalog',
                 rel: 'subsection',
-                href: `/opds/libraries/${libraryId}?name=${encodeURI(item)}&type=${type}`
+                href: `/opds/libraries/${encodeURIComponent(libraryIdValue)}?${query.toString()}`
             })
             .up()
     })
 }
 
-export function buildCustomCardEntries(items: { item: string; link: string }[]): XMLNode[] {
+export function buildCustomCardEntries(
+    items: { item: string; link: string }[],
+    updated = new Date().toISOString()
+): XMLNode[] {
     return items.map((item) => {
         return builder
             .create('entry', { headless: true })
@@ -285,25 +350,55 @@ export function buildCustomCardEntries(items: { item: string; link: string }[]):
             .up()
             .ele('title', item.item)
             .up()
-            .ele('updated', new Date().toISOString())
+            .ele('updated', updated)
             .up()
-            .ele('link', { type: 'application/atom+xml;profile=opds-catalog', rel: 'subsection', href: item.link })
+            .ele('link', {
+                type: 'application/atom+xml;profile=opds-catalog',
+                rel: 'subsection',
+                href: item.link
+            })
             .up()
     })
 }
 
-export function buildItemEntries(libraryItems: LibraryItem[], user: InternalUser): XMLNode[] {
-    const typeMap: Record<string, string> = {
-        audiobook: 'audio/mpeg',
-        epub: 'application/epub+zip',
-        pdf: 'application/pdf',
-        mobi: 'application/x-mobipocket-ebook'
-    }
+function buildEbookDownloadUrl(item: LibraryItem, user: InternalUser): string {
+    const query = new URLSearchParams({
+        format: item.format || '',
+        token: user.apiKey
+    })
 
+    const filename = encodeURIComponent(buildDownloadFilename(item.title, item.format))
+
+    return `/opds/download/${encodeURIComponent(item.id)}/${filename}?${query.toString()}`
+}
+
+function buildCoverUrl(item: LibraryItem, user: InternalUser): string {
+    const query = new URLSearchParams({
+        token: user.apiKey
+    })
+
+    return `/opds/cover/${encodeURIComponent(item.id)}?${query.toString()}`
+}
+
+function getItemUpdated(item: LibraryItem, fallback: string): string {
+    const timestamp = Date.parse(item.addedAt)
+    return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : fallback
+}
+
+export function buildItemEntries(
+    libraryItems: LibraryItem[],
+    user: InternalUser,
+    updated = new Date().toISOString()
+): XMLNode[] {
     const linkUrl = useProxy ? `/opds/proxy` : `${serverURL}`
 
     return libraryItems.map((item) => {
         const authors = item.authors
+        const downloadUrl = item.format
+            ? buildEbookDownloadUrl(item, user)
+            : `${linkUrl}/api/items/${item.id}/download?token=${user.apiKey}`
+        const coverUrl = buildCoverUrl(item, user)
+
         let xml = builder
             .create('entry', { headless: true })
             .ele('id', `urn:uuid:${item.id}`)
@@ -312,7 +407,7 @@ export function buildItemEntries(libraryItems: LibraryItem[], user: InternalUser
             .up()
             .ele('subtitle', item.subtitle)
             .up()
-            .ele('updated', new Date().toISOString())
+            .ele('updated', getItemUpdated(item, updated))
             .up()
             .ele('content', { type: 'text' }, item.description)
             .up()
@@ -325,25 +420,19 @@ export function buildItemEntries(libraryItems: LibraryItem[], user: InternalUser
             .ele('language', item.language)
             .up()
             .ele('link', {
-                href: `${linkUrl}/api/items/${item.id}/download?token=${user.apiKey}`,
+                href: downloadUrl,
                 rel: 'http://opds-spec.org/acquisition',
-                type: 'application/octet-stream'
+                type: item.format ? getDownloadMimeType(item.format) : 'application/octet-stream'
             })
             .up()
             .ele('link', {
-                href: `${linkUrl}/api/items/${item.id}/ebook?token=${user.apiKey}`,
-                rel: 'http://opds-spec.org/acquisition',
-                type: typeMap[item.format] || 'application/octet-stream'
-            })
-            .up()
-            .ele('link', {
-                href: `${linkUrl}/api/items/${item.id}/cover?token=${user.apiKey}`,
+                href: coverUrl,
                 rel: 'http://opds-spec.org/image',
                 type: 'image/webp'
             })
             .up()
             .ele('link', {
-                href: `${linkUrl}/api/items/${item.id}/cover?token=${user.apiKey}`,
+                href: coverUrl,
                 rel: 'http://opds-spec.org/image',
                 type: 'image/png'
             })
@@ -376,5 +465,5 @@ export function buildSearchDefinition(id: string | string[], user: InternalUser)
             template: `/opds/libraries/${id}?q={searchTerms}&amp;author={atom:author}&amp;title={atom:title}`
         })
         .up()
-        .end({ pretty: true })
+        .end({ pretty: false })
 }
