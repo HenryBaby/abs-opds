@@ -294,6 +294,10 @@ export function buildCustomCardEntries(items: { item: string; link: string }[]):
 }
 
 function buildEbookDownloadUrl(item: LibraryItem, user: InternalUser): string {
+    if (!useProxy) {
+        return `${serverURL}/api/items/${item.id}/ebook?token=${user.apiKey}`
+    }
+
     const query = new URLSearchParams({
         format: item.format,
         token: user.apiKey
